@@ -752,16 +752,19 @@
   transition: color 160ms ease, border-color 160ms ease;
 }
 
-.footerLink span {
+.footerLinkText {
   border-bottom: 1px solid rgba(127, 230, 255, 0.3);
   padding-bottom: 2px;
+  line-height: 1.2;
+  display: inline-flex;
+  align-items: center;
 }
 
 .footerLink:hover {
   color: #ffffff;
 }
 
-.footerLink:hover span {
+.footerLink:hover .footerLinkText {
   border-color: rgba(127, 230, 255, 0.7);
 }
 

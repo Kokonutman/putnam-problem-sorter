@@ -64,7 +64,7 @@ export default async function LoginPage({
             width={26}
             height={26}
           />
-          <span>arjun.systems</span>
+          <span className={styles.footerLinkText}>arjun.systems</span>
         </a>
         <span className={styles.footerDivider}>{"//"}</span>
         <a className={styles.footerLink} href="https://arjuniyer.dev" target="_blank" rel="noreferrer">
@@ -75,7 +75,7 @@ export default async function LoginPage({
             width={20}
             height={20}
           />
-          <span>arjuniyer.dev</span>
+          <span className={styles.footerLinkText}>arjuniyer.dev</span>
         </a>
       </footer>
     </main>
