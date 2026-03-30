@@ -1,0 +1,47 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Oxanium:wght@300;400;600;700&display=swap");
+
+:root {
+  color-scheme: dark;
+  --font-display: "Oxanium", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  --font-mono:
+    "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  --bg: #070b10;
+  --ink: #dce7f5;
+  --ink-soft: #b7c7d9;
+  --muted: #90a6bf;
+  --accent: #7fe6ff;
+  --panel: rgba(9, 13, 18, 0.78);
+  --panel-border: rgba(129, 160, 186, 0.22);
+  --shadow: 0 20px 40px rgba(2, 6, 10, 0.42);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  font-family: var(--font-display);
+  background: var(--bg);
+  color: var(--ink);
+}
+
+body {
+  background:
+    radial-gradient(70rem 34rem at 14% -8%, rgba(106, 219, 255, 0.14), transparent 62%),
+    radial-gradient(56rem 32rem at 82% -12%, rgba(255, 191, 97, 0.12), transparent 60%),
+    linear-gradient(180deg, #070b10 0%, #0b1117 48%, #0c1219 100%);
+}
+
+a {
+  color: inherit;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
