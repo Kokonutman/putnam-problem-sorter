@@ -5,7 +5,7 @@ import { AUTH_COOKIE_NAME, getConfiguredPassword, getExpectedAuthToken } from "@
 export async function POST(request: Request) {
   const formData = await request.formData();
   const password = String(formData.get("password") ?? "");
-  const next = String(formData.get("next") ?? "/");
+  const next = String(formData.get("next") ?? "/trainer");
   const configuredPassword = getConfiguredPassword();
 
   if (!configuredPassword) {

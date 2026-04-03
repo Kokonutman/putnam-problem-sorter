@@ -315,6 +315,32 @@
   flex-wrap: wrap;
 }
 
+.tabRow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tabButton {
+  border-radius: 999px;
+  border: 1px solid rgba(127, 230, 255, 0.2);
+  background: rgba(7, 18, 26, 0.76);
+  color: #cfe8fa;
+  padding: 9px 14px;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.68rem;
+}
+
+.tabButtonActive {
+  background: linear-gradient(180deg, #9ff0ff 0%, #6bd8f0 100%);
+  color: #03101a;
+  border-color: rgba(0, 0, 0, 0.55);
+}
+
 .sectionHeader {
   margin-bottom: 12px;
   display: flex;
@@ -341,9 +367,23 @@
   padding: 18px;
 }
 
+.practicePanelFlash {
+  animation: panelPulse 1.15s ease;
+}
+
 .controlsGrid,
 .gridTwo,
 .calloutGrid {
+  display: grid;
+  gap: 16px;
+}
+
+.workspaceGrid,
+.workspaceSide,
+.queueGrid,
+.controlStack,
+.historyGrid,
+.logbookGrid {
   display: grid;
   gap: 16px;
 }
@@ -362,9 +402,49 @@
   margin-top: 12px;
 }
 
+.workspaceGrid {
+  grid-template-columns: minmax(360px, 0.95fr) minmax(300px, 0.7fr);
+  align-items: start;
+}
+
+.workspaceSide {
+  grid-template-columns: 1fr;
+}
+
+.historyGrid {
+  grid-template-columns: minmax(320px, 0.95fr) minmax(280px, 0.8fr);
+  align-items: start;
+}
+
+.logbookGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+.queueGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
+}
+
 .controlGroup {
   display: grid;
   gap: 10px;
+}
+
+.manualPicker {
+  display: grid;
+  gap: 8px;
+}
+
+.manualProblemGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.manualProblemGrid .problemButton:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .controlLabel,
@@ -542,6 +622,84 @@
   margin-top: 12px;
 }
 
+.bucketList {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.queueCard {
+  display: grid;
+  gap: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(127, 230, 255, 0.12);
+  background:
+    linear-gradient(180deg, rgba(10, 16, 22, 0.92), rgba(7, 11, 16, 0.86));
+  padding: 14px;
+}
+
+.queueCardTop {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.queueTags {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+}
+
+.queueCardStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.queueStat {
+  border-radius: 10px;
+  border: 1px solid rgba(127, 230, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 10px;
+  display: grid;
+  gap: 4px;
+}
+
+.queueStatLabel,
+.queueStatValue {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.queueStatLabel {
+  font-size: 0.62rem;
+  color: var(--muted);
+}
+
+.queueStatValue {
+  font-size: 0.8rem;
+  color: #eef8ff;
+}
+
+.queueTopic {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+}
+
+.queueCardActions {
+  display: grid;
+  gap: 8px;
+}
+
+.queueLinkRow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .suggestionRow {
   display: grid;
   grid-template-columns: 96px 72px minmax(0, 1fr) auto;
@@ -628,7 +786,14 @@
 }
 
 .trainingBucket {
-  margin-top: 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(127, 230, 255, 0.12);
+  background: rgba(7, 11, 16, 0.52);
+  padding: 14px;
+}
+
+.bucketHeader {
+  min-height: 72px;
 }
 
 .trainingForm {
@@ -799,11 +964,29 @@
   }
 }
 
+@keyframes panelPulse {
+  0% {
+    box-shadow:
+      0 0 0 0 rgba(127, 230, 255, 0.32),
+      var(--shadow),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+    border-color: rgba(127, 230, 255, 0.45);
+  }
+  100% {
+    box-shadow: var(--shadow), inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+    border-color: var(--panel-border);
+  }
+}
+
 @media (max-width: 1180px) {
   .hero,
   .gridTwo,
   .controlsGrid,
-  .suggestionLayout {
+  .suggestionLayout,
+  .workspaceGrid,
+  .queueGrid,
+  .historyGrid,
+  .logbookGrid {
     grid-template-columns: 1fr;
   }
 }
@@ -832,6 +1015,20 @@
   .summaryStrip,
   .trainingInputs {
     grid-template-columns: 1fr;
+  }
+
+  .queueCardStats,
+  .queueLinkRow,
+  .manualProblemGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .queueCardTop {
+    flex-direction: column;
+  }
+
+  .queueTags {
+    justify-items: start;
   }
 
   .rankingRow {

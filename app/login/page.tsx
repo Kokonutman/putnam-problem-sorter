@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
-import Image from "next/image";
 import { getConfiguredPassword } from "@/lib/auth";
 import styles from "@/components/putnam-dashboard.module.css";
+import { SiteFooter } from "@/components/site-footer";
 
 export const metadata: Metadata = {
   title: "Login | Putnam Proof Trainer",
@@ -14,7 +14,7 @@ export default async function LoginPage({
 }) {
   const params = await searchParams;
   const error = typeof params.error === "string" ? params.error : "";
-  const next = typeof params.next === "string" ? params.next : "/";
+  const next = typeof params.next === "string" ? params.next : "/trainer";
   const hasConfiguredPassword = Boolean(getConfiguredPassword());
 
   return (
@@ -25,7 +25,7 @@ export default async function LoginPage({
           <p className={styles.eyebrow}>Restricted Access</p>
           <h1 className={styles.heroTitle}>Putnam Proof Trainer</h1>
           <p className={styles.authCopy}>
-            This dashboard is protected by a single shared password. Access is granted with a secure cookie after login.
+            Enter the shared password to access the private training workspace.
           </p>
 
           {!hasConfiguredPassword ? (
@@ -55,29 +55,7 @@ export default async function LoginPage({
           )}
         </div>
       </section>
-      <footer className={styles.footer}>
-        <a className={styles.footerLink} href="https://arjun.systems" target="_blank" rel="noreferrer">
-          <Image
-            className={`${styles.footerIcon} ${styles.footerIconLarge}`}
-            src="/systems%20site%20icon.png"
-            alt="Arjun Systems"
-            width={26}
-            height={26}
-          />
-          <span className={styles.footerLinkText}>arjun.systems</span>
-        </a>
-        <span className={styles.footerDivider}>{"//"}</span>
-        <a className={styles.footerLink} href="https://arjuniyer.dev" target="_blank" rel="noreferrer">
-          <Image
-            className={styles.footerIcon}
-            src="/personal%20site%20icon.png"
-            alt="Arjun Iyer"
-            width={20}
-            height={20}
-          />
-          <span className={styles.footerLinkText}>arjuniyer.dev</span>
-        </a>
-      </footer>
+      <SiteFooter />
     </main>
   );
 }

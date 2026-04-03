@@ -1,8 +1,7 @@
 
 "use client";
 
-import Image from "next/image";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import {
   Bar,
@@ -34,6 +33,7 @@ import {
   problemKey,
   recommendationBucket,
 } from "@/lib/training";
+import { SiteFooter } from "@/components/site-footer";
 
 const METRIC_META: Record<
   MetricKey,
@@ -92,6 +92,7 @@ const PROBLEM_COLORS: Record<ProblemId, string> = {
 };
 
 type SuggestionSort = "easiest" | "toughest";
+type DashboardTab = "practice" | "history";
 type PracticeState = {
   records: PracticeRecord[];
   storageMode: "supabase" | "memory";
@@ -142,9 +143,7 @@ function usePracticeState() {
       body: JSON.stringify(body),
     });
 
-    if (!response.ok) {
-      throw new Error("Failed to update practice records");
-    }
+    if (!response.ok) throw new Error("Failed to update practice records");
 
     const next = (await response.json()) as PracticeState;
     setState(next);
@@ -258,7 +257,7 @@ function MissingDatasetState() {
         <p>Optional metadata file: <span className={styles.code}>putnam_problem_metadata.json</span> for future topic tagging.</p>
       </section>
 
-      <Footer />
+      <SiteFooter />
     </main>
   );
 }
@@ -270,10 +269,15 @@ function PutnamDashboardLoaded({ dataset }: { dataset: PutnamDataset }) {
   const [side, setSide] = useState<"all" | "A" | "B">("all");
   const [selectedProblems, setSelectedProblems] = useState<ProblemId[]>([...PROBLEMS]);
   const [suggestionSort, setSuggestionSort] = useState<SuggestionSort>("easiest");
+  const [activeTab, setActiveTab] = useState<DashboardTab>("practice");
   const [selectedPracticeKey, setSelectedPracticeKey] = useState<string | null>(null);
   const [isHydrated, setIsHydrated] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [practicePanelFlash, setPracticePanelFlash] = useState(false);
+  const [manualYear, setManualYear] = useState<string>(() => String(years[years.length - 1]));
+  const [manualProblem, setManualProblem] = useState<ProblemId>("A1");
+  const practicePanelRef = useRef<HTMLElement | null>(null);
   const { records, storageMode, isLoaded, error, save, remove } = usePracticeState();
 
   useEffect(() => {
@@ -297,23 +301,27 @@ function PutnamDashboardLoaded({ dataset }: { dataset: PutnamDataset }) {
     [dataset.rows, visibleProblems, yearEnd, yearStart]
   );
 
+  const allTrainingRows = useMemo<TrainingEntry[]>(
+    () =>
+      dataset.rows.map((row) => {
+        const key = problemKey(row.year, row.problem);
+        const record = recordsByKey.get(key) ?? null;
+        return {
+          ...row,
+          key,
+          difficulty: difficultyScore(row),
+          record,
+          status: record?.status ?? "unattempted",
+          metadata: dataset.metadataByKey[key] ?? null,
+        };
+      }),
+    [dataset.metadataByKey, dataset.rows, recordsByKey]
+  );
+
   const trainingRows = useMemo<TrainingEntry[]>(
     () =>
-      dataset.rows
-        .filter((row) => row.year >= yearStart && row.year <= yearEnd && activeProblems.includes(row.problem))
-        .map((row) => {
-          const key = problemKey(row.year, row.problem);
-          const record = recordsByKey.get(key) ?? null;
-          return {
-            ...row,
-            key,
-            difficulty: difficultyScore(row),
-            record,
-            status: record?.status ?? "unattempted",
-            metadata: dataset.metadataByKey[key] ?? null,
-          };
-        }),
-    [activeProblems, dataset.metadataByKey, dataset.rows, recordsByKey, yearEnd, yearStart]
+      allTrainingRows.filter((row) => row.year >= yearStart && row.year <= yearEnd && activeProblems.includes(row.problem)),
+    [activeProblems, allTrainingRows, yearEnd, yearStart]
   );
 
   const metricMeta = METRIC_META[metric];
@@ -325,10 +333,7 @@ function PutnamDashboardLoaded({ dataset }: { dataset: PutnamDataset }) {
   const totalHours = useMemo(() => records.reduce((sum, record) => sum + record.total_minutes, 0) / 60, [records]);
 
   const recentPractice = useMemo(
-    () =>
-      [...records]
-        .sort((a, b) => (b.last_attempted_at ?? "").localeCompare(a.last_attempted_at ?? ""))
-        .slice(0, 8),
+    () => [...records].sort((a, b) => (b.last_attempted_at ?? "").localeCompare(a.last_attempted_at ?? "")).slice(0, 8),
     [records]
   );
 
@@ -337,7 +342,6 @@ function PutnamDashboardLoaded({ dataset }: { dataset: PutnamDataset }) {
     const sorted = [...remaining].sort((a, b) => {
       const aDistance = Math.abs(a.difficulty - currentLevel);
       const bDistance = Math.abs(b.difficulty - currentLevel);
-
       if (suggestionSort === "easiest" && a.difficulty !== b.difficulty) return a.difficulty - b.difficulty;
       if (suggestionSort === "toughest" && a.difficulty !== b.difficulty) return b.difficulty - a.difficulty;
       if (aDistance !== bDistance) return aDistance - bDistance;
@@ -360,12 +364,18 @@ function PutnamDashboardLoaded({ dataset }: { dataset: PutnamDataset }) {
   }, [currentLevel, suggestionSort, trainingRows]);
 
   const selectedPracticeEntry =
-    trainingRows.find((entry) => entry.key === selectedPracticeKey) ??
+    allTrainingRows.find((entry) => entry.key === selectedPracticeKey) ??
     recommendationGroups.on_level[0] ??
     recommendationGroups.confidence[0] ??
     recommendationGroups.stretch[0] ??
     trainingRows[0] ??
     null;
+
+  const manualYearNumber = Number(manualYear);
+  const manualEntry =
+    Number.isInteger(manualYearNumber) && manualYear.length === 4
+      ? allTrainingRows.find((entry) => entry.year === manualYearNumber && entry.problem === manualProblem) ?? null
+      : null;
 
   const completedEntries = useMemo(
     () =>
@@ -385,11 +395,7 @@ function PutnamDashboardLoaded({ dataset }: { dataset: PutnamDataset }) {
       visibleProblems
         .map((problem) => {
           const rows = filteredRows.filter((row) => row.problem === problem);
-          return {
-            problem,
-            value: groupAverage(rows, metric),
-            attempt: groupAverage(rows, "attempted_rate"),
-          };
+          return { problem, value: groupAverage(rows, metric), attempt: groupAverage(rows, "attempted_rate") };
         })
         .sort((a, b) => b.value - a.value),
     [filteredRows, metric, visibleProblems]
@@ -397,20 +403,14 @@ function PutnamDashboardLoaded({ dataset }: { dataset: PutnamDataset }) {
 
   const summary = useMemo(() => {
     const easiest = rankingData[0];
-    const hardest = rankingData[rankingData.length - 1];
     const mostSkipped = [...rankingData].sort((a, b) => a.attempt - b.attempt)[0];
-
     return {
       years: new Set(filteredRows.map((row) => row.year)).size,
-      meanPopulation: average(
-        [...new Set(filteredRows.map((row) => `${row.year}:${row.population_top_n}`))].map((key) => Number(key.split(":")[1]))
-      ),
+      meanPopulation: average([...new Set(filteredRows.map((row) => `${row.year}:${row.population_top_n}`))].map((key) => Number(key.split(":")[1]))),
       easiest,
-      hardest,
       mostSkipped,
-      longRunMean: groupAverage(filteredRows, metric),
     };
-  }, [filteredRows, metric, rankingData]);
+  }, [filteredRows, rankingData]);
 
   const heatmapYears = useMemo(() => years.filter((year) => year >= yearStart && year <= yearEnd), [yearEnd, yearStart, years]);
   const heatmapValues = useMemo(() => {
@@ -420,11 +420,7 @@ function PutnamDashboardLoaded({ dataset }: { dataset: PutnamDataset }) {
         return row ? metricValue(row, metric) : 0;
       })
     );
-
-    return {
-      min: values.length ? Math.min(...values) : 0,
-      max: values.length ? Math.max(...values) : 1,
-    };
+    return { min: values.length ? Math.min(...values) : 0, max: values.length ? Math.max(...values) : 1 };
   }, [activeProblems, dataset.rows, heatmapYears, metric]);
 
   const toggleProblem = (problem: ProblemId) => {
@@ -433,10 +429,10 @@ function PutnamDashboardLoaded({ dataset }: { dataset: PutnamDataset }) {
         if (current.length === 1) return current;
         return current.filter((item) => item !== problem);
       }
-
       return [...current, problem].sort((a, b) => PROBLEMS.indexOf(a) - PROBLEMS.indexOf(b));
     });
   };
+
   async function handlePracticeSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedPracticeEntry) return;
@@ -485,6 +481,24 @@ function PutnamDashboardLoaded({ dataset }: { dataset: PutnamDataset }) {
     }
   }
 
+  function openPracticeRecord(problemKeyValue: string) {
+    setSelectedPracticeKey(problemKeyValue);
+    setPracticePanelFlash(true);
+    practicePanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  useEffect(() => {
+    if (!practicePanelFlash) return;
+    const timer = window.setTimeout(() => setPracticePanelFlash(false), 1200);
+    return () => window.clearTimeout(timer);
+  }, [practicePanelFlash]);
+
+  useEffect(() => {
+    if (!selectedPracticeEntry) return;
+    setManualYear(String(selectedPracticeEntry.year));
+    setManualProblem(selectedPracticeEntry.problem);
+  }, [selectedPracticeEntry]);
+
   return (
     <main id="top" className={styles.page}>
       <div className={styles.backdrop} aria-hidden />
@@ -495,12 +509,21 @@ function PutnamDashboardLoaded({ dataset }: { dataset: PutnamDataset }) {
           <h1 className={styles.brandTitle}>Putnam Proof Trainer</h1>
         </div>
         <div className={styles.headerActions}>
-          <nav className={styles.nav}>
-            <a href="#training">Training</a>
-            <a href="#controls">Controls</a>
-            <a href="#rankings">Rankings</a>
-            <a href="#overview">Overview</a>
-          </nav>
+          <div className={styles.tabRow}>
+            {([
+              ["practice", "Practice"],
+              ["history", "History"],
+            ] as const).map(([tab, label]) => (
+              <button
+                key={tab}
+                type="button"
+                className={clsx(styles.tabButton, activeTab === tab && styles.tabButtonActive)}
+                onClick={() => setActiveTab(tab)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <a className={styles.logoutButton} href="/auth/logout">
             Log Out
           </a>
@@ -509,515 +532,534 @@ function PutnamDashboardLoaded({ dataset }: { dataset: PutnamDataset }) {
 
       <section className={clsx(styles.hero, styles.animateIn)}>
         <article className={styles.heroCard}>
-          <p className={styles.eyebrow}>Proof Practice</p>
-          <h2 className={styles.heroTitle}>Know what to work on next.</h2>
+          <p className={styles.eyebrow}>{activeTab === "practice" ? "Practice Workspace" : "Historical Archive"}</p>
+          <h2 className={styles.heroTitle}>{activeTab === "practice" ? "Adaptive proof training." : "Archive-level difficulty context."}</h2>
           <p className={styles.heroCopy}>
-            This site uses historical Top N score distributions to calibrate problem difficulty, then uses your own practice
-            history to keep you working near the edge of your current level.
+            {activeTab === "practice"
+              ? "Historical Top N score distributions calibrate the queue. Practice records, solve states, and recent results shape the current training level."
+              : "Use the static archive to inspect long-run Putnam difficulty patterns across years, sides, and slots without changing the training state."}
           </p>
           <div className={styles.heroMeta}>
             <span className={styles.metaChip}>Window {formatYearRange(yearStart, yearEnd)}</span>
-            <span className={styles.metaChip}>{attemptedCount} tracked problems</span>
-            <span className={styles.metaChip}>{selectedPracticeEntry ? `Next ${selectedPracticeEntry.year} ${selectedPracticeEntry.problem}` : "No current recommendation"}</span>
+            {activeTab === "practice" ? (
+              <>
+                <span className={styles.metaChip}>{attemptedCount} tracked problems</span>
+                <span className={styles.metaChip}>{selectedPracticeEntry ? `Next ${selectedPracticeEntry.year} ${selectedPracticeEntry.problem}` : "No current recommendation"}</span>
+              </>
+            ) : (
+              <>
+                <span className={styles.metaChip}>{summary.years} active years</span>
+                <span className={styles.metaChip}>{summary.easiest ? `Strongest ${summary.easiest.problem}` : "No active slice"}</span>
+              </>
+            )}
           </div>
         </article>
 
         <div className={styles.heroSide}>
           <div className={styles.summaryGrid}>
             <article className={styles.summaryCard}>
-              <p className={styles.summaryLabel}>Current Level</p>
-              <p className={styles.summaryValue}>{currentLevel.toFixed(0)}</p>
-              <p className={styles.summaryHint}>Difficulty estimate from your strongest and most recent work</p>
+              <p className={styles.summaryLabel}>{activeTab === "practice" ? "Current Level" : "Mean Top N"}</p>
+              <p className={styles.summaryValue}>{activeTab === "practice" ? currentLevel.toFixed(0) : summary.meanPopulation.toFixed(0)}</p>
+              <p className={styles.summaryHint}>{activeTab === "practice" ? "Difficulty estimate from your strongest and most recent work" : "Average published comparison population"}</p>
             </article>
             <article className={styles.summaryCard}>
-              <p className={styles.summaryLabel}>Solved</p>
-              <p className={styles.summaryValue}>{solvedCount}</p>
-              <p className={styles.summaryHint}>Solved, hinted, solution-read, or archived</p>
+              <p className={styles.summaryLabel}>{activeTab === "practice" ? "Solved" : "Strongest Slot"}</p>
+              <p className={styles.summaryValue}>{activeTab === "practice" ? solvedCount : summary.easiest?.problem ?? "--"}</p>
+              <p className={styles.summaryHint}>{activeTab === "practice" ? "Solved, hinted, solution-read, or archived" : "Highest long-run value in the current slice"}</p>
             </article>
             <article className={styles.summaryCard}>
-              <p className={styles.summaryLabel}>In Progress</p>
-              <p className={styles.summaryValue}>{activeCount}</p>
-              <p className={styles.summaryHint}>{partialCount} partially solved</p>
+              <p className={styles.summaryLabel}>{activeTab === "practice" ? "In Progress" : "Most Skipped"}</p>
+              <p className={styles.summaryValue}>{activeTab === "practice" ? activeCount : summary.mostSkipped?.problem ?? "--"}</p>
+              <p className={styles.summaryHint}>{activeTab === "practice" ? `${partialCount} partially solved` : "Lowest attempt rate in the current slice"}</p>
             </article>
             <article className={styles.summaryCard}>
-              <p className={styles.summaryLabel}>Time Logged</p>
-              <p className={styles.summaryValue}>{totalHours.toFixed(1)}h</p>
-              <p className={styles.summaryHint}>Across all tracked practice records</p>
+              <p className={styles.summaryLabel}>{activeTab === "practice" ? "Time Logged" : "Metric"}</p>
+              <p className={styles.summaryValue}>{activeTab === "practice" ? `${totalHours.toFixed(1)}h` : metricMeta.short}</p>
+              <p className={styles.summaryHint}>{activeTab === "practice" ? "Across all tracked practice records" : metricMeta.description}</p>
             </article>
           </div>
 
           <aside className={styles.notePanel}>
-            <p className={styles.noteTitle}>Calibration Note</p>
+            <p className={styles.noteTitle}>Dataset Basis</p>
             <p className={styles.noteCopy}>
-              All rates are computed against each year&apos;s published <strong>Top N contestants</strong>, not the full
-              contest population. The dataset is static and loaded locally. Practice state is stored server-side
-              {storageMode === "supabase" ? " in Supabase." : " using the temporary in-memory fallback."}
+              All rates are computed against each year&apos;s published <strong>Top N contestants</strong>, not the full contest population.
+              The dataset is static and loaded locally. Practice state is stored server-side{storageMode === "supabase" ? " in Supabase." : " using the temporary in-memory fallback."}
             </p>
           </aside>
         </div>
       </section>
-
-      <section id="training" className={styles.section}>
-        <div className={styles.suggestionLayout}>
-          <article className={styles.panel}>
-            <div className={styles.sectionHeader}>
-              <div>
-                <h3 className={styles.sectionTitle}>Training Queue</h3>
-                <p className={styles.sectionCopy}>
-                  Recommendations are grouped into confidence wins, on-level work, and stretch problems. Solved and archived
-                  problems are hidden from the queue until you reopen them.
-                </p>
-              </div>
-              <div className={styles.suggestionControls}>
-                {(["easiest", "toughest"] as const).map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    className={clsx(styles.sideButton, suggestionSort === value && styles.sideButtonActive)}
-                    onClick={() => setSuggestionSort(value)}
-                  >
-                    {value === "easiest" ? "Easier Bias" : "Harder Bias"}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {error ? <div className={styles.suggestionEmpty}>{error}</div> : null}
-
-            {!isLoaded ? (
-              <div className={styles.suggestionEmpty}>Loading practice state...</div>
-            ) : (
-              <>
-                {([
-                  ["confidence", "Confidence Wins", "Cleaner reps below your current level."],
-                  ["on_level", "On-Level Problems", "Best fit for your current proof level."],
-                  ["stretch", "Stretch Problems", "Harder pushes to test whether you are ready to move up."],
-                ] as const).map(([bucketKey, title, copy]) => {
-                  const entries = recommendationGroups[bucketKey];
-
-                  return (
-                    <div key={bucketKey} className={styles.trainingBucket}>
-                      <div className={styles.sectionHeader}>
-                        <div>
-                          <h4 className={styles.sectionTitle}>{title}</h4>
-                          <p className={styles.sectionCopy}>{copy}</p>
-                        </div>
-                      </div>
-
-                      {entries.length === 0 ? (
-                        <div className={styles.suggestionEmpty}>No matching problems in the current filter slice.</div>
-                      ) : (
-                        <div className={styles.suggestionList}>
-                          {entries.map((row) => (
-                            <div key={row.key} className={clsx(styles.suggestionRow, selectedPracticeEntry?.key === row.key && styles.suggestionRowActive)}>
-                              <div className={styles.suggestionMeta}>
-                                <span className={styles.suggestionYear}>{row.year}</span>
-                                <span className={styles.suggestionTag}>Difficulty {row.difficulty.toFixed(1)}</span>
-                              </div>
-                              <div className={styles.suggestionMeta}>
-                                <span className={styles.suggestionProblem}>{row.problem}</span>
-                                <span className={styles.suggestionTag}>{formatStatus(row.status)}</span>
-                              </div>
-                              <div>
-                                <p className={styles.suggestionValue}>{METRIC_META.perfect_solve_rate.format(row.perfect_solve_rate)} perfect</p>
-                                <p className={styles.suggestionHint}>
-                                  {METRIC_META.attempted_rate.format(row.attempted_rate)} attempted, avg {row.average_score.toFixed(2)}
-                                </p>
-                                {row.metadata?.primary_topic ? <p className={styles.suggestionHint}>Topic: {row.metadata.primary_topic}</p> : null}
-                              </div>
-                              <div className={styles.suggestionActions}>
-                                <button className={styles.completeButton} type="button" onClick={() => setSelectedPracticeKey(row.key)}>
-                                  Train
-                                </button>
-                                <a className={styles.ghostButton} href={problemSetUrl(row.year)} target="_blank" rel="noreferrer">
-                                  Problem
-                                </a>
-                                <a className={styles.ghostButton} href={solutionUrl(row.year)} target="_blank" rel="noreferrer">
-                                  Solution
-                                </a>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </>
-            )}
-          </article>
-          <aside className={styles.panel}>
-            <div className={styles.sectionHeader}>
-              <div>
-                <h3 className={styles.sectionTitle}>Practice Record</h3>
-                <p className={styles.sectionCopy}>Update the selected problem without leaving the queue.</p>
-              </div>
-            </div>
-
-            {!isLoaded ? (
-              <div className={styles.suggestionEmpty}>Loading practice state...</div>
-            ) : !selectedPracticeEntry ? (
-              <div className={styles.suggestionEmpty}>No practice target available for the current filters.</div>
-            ) : (
-              <form key={selectedPracticeEntry.key} className={styles.trainingForm} onSubmit={handlePracticeSubmit}>
-                <div className={styles.completedRow}>
+      {activeTab === "practice" ? (
+        <>
+          <section id="training" className={styles.section}>
+            <div className={styles.workspaceGrid}>
+              <aside ref={practicePanelRef} className={clsx(styles.panel, practicePanelFlash && styles.practicePanelFlash)} tabIndex={-1}>
+                <div className={styles.sectionHeader}>
                   <div>
-                    <div className={styles.suggestionValue}>
-                      {selectedPracticeEntry.year} {selectedPracticeEntry.problem}
+                    <h3 className={styles.sectionTitle}>Practice Record</h3>
+                    <p className={styles.sectionCopy}>Active problem state, notes, and result logging.</p>
+                  </div>
+                </div>
+                {!isLoaded ? (
+                  <div className={styles.suggestionEmpty}>Loading practice state...</div>
+                ) : !selectedPracticeEntry ? (
+                  <div className={styles.suggestionEmpty}>No practice target available for the current filters.</div>
+                ) : (
+                  <form key={selectedPracticeEntry.key} className={styles.trainingForm} onSubmit={handlePracticeSubmit}>
+                    <div className={styles.completedRow}>
+                      <div>
+                        <div className={styles.suggestionValue}>{selectedPracticeEntry.year} {selectedPracticeEntry.problem}</div>
+                        <div className={styles.suggestionHint}>Difficulty {selectedPracticeEntry.difficulty.toFixed(1)} | {selectedPracticeEntry.metadata?.primary_topic ?? "Topic pending"}</div>
+                        <div className={styles.suggestionHint}>Last touched: {formatAttemptDate(selectedPracticeEntry.record?.last_attempted_at ?? null)}</div>
+                      </div>
+                      <button className={styles.ghostButton} type="button" onClick={() => void handleReset(selectedPracticeEntry.key)}>Reset</button>
                     </div>
-                    <div className={styles.suggestionHint}>
-                      Difficulty {selectedPracticeEntry.difficulty.toFixed(1)} | {selectedPracticeEntry.metadata?.primary_topic ?? "Topic pending"}
+
+                    {saveError ? <div className={styles.suggestionEmpty}>{saveError}</div> : null}
+
+                    <label className={styles.controlGroup}>
+                      <span className={styles.controlLabel}>Status</span>
+                      <select className={styles.select} name="status" defaultValue={selectedPracticeEntry.record?.status ?? "unattempted"}>
+                        {PRACTICE_STATUSES.map((status) => (
+                          <option key={status} value={status}>{formatStatus(status)}</option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <div className={styles.trainingInputs}>
+                      <label className={styles.controlGroup}>
+                        <span className={styles.controlLabel}>Total Minutes</span>
+                        <input className={styles.select} name="total_minutes" type="number" min="0" defaultValue={selectedPracticeEntry.record?.total_minutes ?? 0} />
+                      </label>
+                      <label className={styles.controlGroup}>
+                        <span className={styles.controlLabel}>Attempt Count</span>
+                        <input className={styles.select} name="attempt_count" type="number" min="0" defaultValue={selectedPracticeEntry.record?.attempt_count ?? 0} />
+                      </label>
                     </div>
-                    <div className={styles.suggestionHint}>Last touched: {formatAttemptDate(selectedPracticeEntry.record?.last_attempted_at ?? null)}</div>
-                  </div>
-                  <button className={styles.ghostButton} type="button" onClick={() => void handleReset(selectedPracticeEntry.key)}>
-                    Reset
-                  </button>
-                </div>
 
-                {saveError ? <div className={styles.suggestionEmpty}>{saveError}</div> : null}
+                    <label className={styles.controlGroup}>
+                      <span className={styles.controlLabel}>Last Attempted</span>
+                      <input className={styles.select} name="touch_date" type="date" defaultValue={selectedPracticeEntry.record?.last_attempted_at?.slice(0, 10) ?? new Date().toISOString().slice(0, 10)} />
+                    </label>
 
-                <label className={styles.controlGroup}>
-                  <span className={styles.controlLabel}>Status</span>
-                  <select className={styles.select} name="status" defaultValue={selectedPracticeEntry.record?.status ?? "unattempted"}>
-                    {PRACTICE_STATUSES.map((status) => (
-                      <option key={status} value={status}>
-                        {formatStatus(status)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    <label className={styles.controlGroup}>
+                      <span className={styles.controlLabel}>Notes</span>
+                      <textarea className={styles.notesField} name="notes" defaultValue={selectedPracticeEntry.record?.notes ?? ""} />
+                    </label>
 
-                <div className={styles.trainingInputs}>
-                  <label className={styles.controlGroup}>
-                    <span className={styles.controlLabel}>Total Minutes</span>
-                    <input className={styles.select} name="total_minutes" type="number" min="0" defaultValue={selectedPracticeEntry.record?.total_minutes ?? 0} />
-                  </label>
-                  <label className={styles.controlGroup}>
-                    <span className={styles.controlLabel}>Attempt Count</span>
-                    <input className={styles.select} name="attempt_count" type="number" min="0" defaultValue={selectedPracticeEntry.record?.attempt_count ?? 0} />
-                  </label>
-                </div>
+                    <div className={styles.suggestionActions}>
+                      <button className={styles.completeButton} type="submit" disabled={saving}>{saving ? "Saving" : "Save Record"}</button>
+                      <a className={styles.ghostButton} href={problemSetUrl(selectedPracticeEntry.year)} target="_blank" rel="noreferrer">Problem</a>
+                      <a className={styles.ghostButton} href={solutionUrl(selectedPracticeEntry.year)} target="_blank" rel="noreferrer">Solution</a>
+                    </div>
 
-                <label className={styles.controlGroup}>
-                  <span className={styles.controlLabel}>Last Attempted</span>
-                  <input
-                    className={styles.select}
-                    name="touch_date"
-                    type="date"
-                    defaultValue={selectedPracticeEntry.record?.last_attempted_at?.slice(0, 10) ?? new Date().toISOString().slice(0, 10)}
-                  />
-                </label>
+                    <div className={styles.practiceMetaGrid}>
+                      <div className={styles.callout}>
+                        <p className={styles.calloutTitle}>Recommended Bucket</p>
+                        <p className={styles.calloutValue}>{formatStatus(recommendationBucket(selectedPracticeEntry.difficulty, currentLevel))}</p>
+                        <p className={styles.calloutHint}>Relative to your current estimated level</p>
+                      </div>
+                      <div className={styles.callout}>
+                        <p className={styles.calloutTitle}>Archive Average</p>
+                        <p className={styles.calloutValue}>{METRIC_META.average_score.format(selectedPracticeEntry.average_score)}</p>
+                        <p className={styles.calloutHint}>Average score for the Top N population</p>
+                      </div>
+                    </div>
+                  </form>
+                )}
+              </aside>
 
-                <label className={styles.controlGroup}>
-                  <span className={styles.controlLabel}>Notes</span>
-                  <textarea className={styles.notesField} name="notes" defaultValue={selectedPracticeEntry.record?.notes ?? ""} />
-                </label>
-
-                <div className={styles.suggestionActions}>
-                  <button className={styles.completeButton} type="submit" disabled={saving}>
-                    {saving ? "Saving" : "Save Record"}
-                  </button>
-                  <a className={styles.ghostButton} href={problemSetUrl(selectedPracticeEntry.year)} target="_blank" rel="noreferrer">
-                    Problem
-                  </a>
-                  <a className={styles.ghostButton} href={solutionUrl(selectedPracticeEntry.year)} target="_blank" rel="noreferrer">
-                    Solution
-                  </a>
-                </div>
-
-                <div className={styles.practiceMetaGrid}>
-                  <div className={styles.callout}>
-                    <p className={styles.calloutTitle}>Recommended Bucket</p>
-                    <p className={styles.calloutValue}>{formatStatus(recommendationBucket(selectedPracticeEntry.difficulty, currentLevel))}</p>
-                    <p className={styles.calloutHint}>Relative to your current estimated level</p>
-                  </div>
-                  <div className={styles.callout}>
-                    <p className={styles.calloutTitle}>Archive Average</p>
-                    <p className={styles.calloutValue}>{METRIC_META.average_score.format(selectedPracticeEntry.average_score)}</p>
-                    <p className={styles.calloutHint}>Average score for the Top N population</p>
-                  </div>
-                </div>
-
-                <div className={styles.completedList}>
-                  <div className={styles.completedRow}>
+              <div className={styles.workspaceSide}>
+                <article id="controls" className={styles.panel}>
+                  <div className={styles.sectionHeader}>
                     <div>
-                      <div className={styles.calloutTitle}>Recent Practice</div>
-                      <div className={styles.suggestionHint}>{recentPractice.length} most recent tracked records</div>
+                      <h3 className={styles.sectionTitle}>Practice Filters</h3>
+                      <p className={styles.sectionCopy}>Recommendation controls and direct archive access.</p>
                     </div>
                   </div>
+
+                  <div className={styles.controlStack}>
+                    <div className={styles.controlGroup}>
+                      <p className={styles.controlLabel}>Direct Problem Open</p>
+                      <div className={styles.manualPicker}>
+                        <input
+                          className={styles.select}
+                          type="number"
+                          inputMode="numeric"
+                          min={years[0]}
+                          max={years[years.length - 1]}
+                          step="1"
+                          value={manualYear}
+                          onChange={(event) => setManualYear(event.target.value)}
+                          placeholder="Year"
+                        />
+                        <div className={styles.manualProblemGrid}>
+                          {PROBLEMS.map((problem) => {
+                            const exists = Number.isInteger(manualYearNumber)
+                              ? allTrainingRows.some((entry) => entry.year === manualYearNumber && entry.problem === problem)
+                              : false;
+                            return (
+                              <button
+                                key={`manual-problem-${problem}`}
+                                type="button"
+                                className={clsx(styles.problemButton, manualProblem === problem && styles.problemButtonActive)}
+                                onClick={() => setManualProblem(problem)}
+                                disabled={!exists}
+                              >
+                                {problem}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <button
+                          type="button"
+                          className={styles.completeButton}
+                          onClick={() => manualEntry && openPracticeRecord(manualEntry.key)}
+                          disabled={!manualEntry}
+                        >
+                          Open in Logger
+                        </button>
+                      </div>
+                      <p className={styles.sectionCopy}>
+                        {manualEntry
+                          ? `${manualEntry.year} ${manualEntry.problem} is ready in the logger.`
+                          : "Select a valid archive year and available slot."}
+                      </p>
+                    </div>
+
+                    <div className={styles.controlGroup}>
+                      <p className={styles.controlLabel}>Recommendation Bias</p>
+                      <div className={styles.suggestionControls}>
+                        {(["easiest", "toughest"] as const).map((value) => (
+                          <button key={value} type="button" className={clsx(styles.sideButton, suggestionSort === value && styles.sideButtonActive)} onClick={() => setSuggestionSort(value)}>
+                            {value === "easiest" ? "Easier Bias" : "Harder Bias"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className={styles.controlGroup}>
+                      <p className={styles.controlLabel}>Year Window</p>
+                      <div className={styles.inlineControls}>
+                        <select className={styles.select} value={yearStart} onChange={(event) => { const next = Number(event.target.value); setYearStart(next); if (next > yearEnd) setYearEnd(next); }}>
+                          {years.map((year) => <option key={`start-${year}`} value={year}>{year}</option>)}
+                        </select>
+                        <select className={styles.select} value={yearEnd} onChange={(event) => setYearEnd(Number(event.target.value))}>
+                          {years.filter((year) => year >= yearStart).map((year) => <option key={`end-${year}`} value={year}>{year}</option>)}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className={styles.controlGroup}>
+                      <p className={styles.controlLabel}>Side and Problem Focus</p>
+                      <div className={styles.sideRow}>
+                        {(["all", "A", "B"] as const).map((value) => (
+                          <button key={value} type="button" className={clsx(styles.sideButton, side === value && styles.sideButtonActive)} onClick={() => setSide(value)}>
+                            {value === "all" ? "Whole Exam" : `${value}-side`}
+                          </button>
+                        ))}
+                      </div>
+                      <div className={styles.problemGrid}>
+                        {visibleProblems.map((problem) => (
+                          <button key={problem} type="button" className={clsx(styles.problemButton, activeProblems.includes(problem) && styles.problemButtonActive)} onClick={() => toggleProblem(problem)}>{problem}</button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              </div>
+            </div>
+          </section>
+
+          <section className={styles.section}>
+            <div className={styles.logbookGrid}>
+              <article className={styles.panel}>
+                <div className={styles.sectionHeader}>
+                    <div>
+                      <h3 className={styles.sectionTitle}>Recent Practice</h3>
+                    <p className={styles.sectionCopy}>{recentPractice.length} recent training records.</p>
+                  </div>
+                </div>
+                <div className={styles.completedList}>
                   {recentPractice.length === 0 ? (
                     <div className={styles.suggestionEmpty}>No practice history yet.</div>
                   ) : (
                     recentPractice.map((record) => (
-                      <button key={record.problem_key} type="button" className={styles.completedRow} onClick={() => setSelectedPracticeKey(record.problem_key)}>
+                      <button key={record.problem_key} type="button" className={styles.completedRow} onClick={() => openPracticeRecord(record.problem_key)}>
                         <div>
-                          <div className={styles.suggestionValue}>
-                            {record.year} {record.problem}
-                          </div>
-                          <div className={styles.suggestionHint}>
-                            {formatStatus(record.status)} | {record.total_minutes} min | {record.attempt_count} attempts
-                          </div>
+                          <div className={styles.suggestionValue}>{record.year} {record.problem}</div>
+                          <div className={styles.suggestionHint}>{formatStatus(record.status)} | {record.total_minutes} min | {record.attempt_count} attempts</div>
                         </div>
                       </button>
                     ))
                   )}
                 </div>
+              </article>
 
-                <div className={styles.completedList}>
-                  <div className={styles.completedRow}>
+              <article className={styles.panel}>
+                <div className={styles.sectionHeader}>
                     <div>
-                      <div className={styles.calloutTitle}>Solved / Archived</div>
-                      <div className={styles.suggestionHint}>Reopen anything here by selecting it and changing the status.</div>
-                    </div>
+                      <h3 className={styles.sectionTitle}>Solved / Archived</h3>
+                    <p className={styles.sectionCopy}>Closed-out work with preserved history.</p>
                   </div>
+                </div>
+                <div className={styles.completedList}>
                   {completedEntries.length === 0 ? (
                     <div className={styles.suggestionEmpty}>Nothing solved or archived yet.</div>
                   ) : (
                     completedEntries.map((entry) => (
-                      <button key={entry.key} type="button" className={styles.completedRow} onClick={() => setSelectedPracticeKey(entry.key)}>
+                      <button key={entry.key} type="button" className={styles.completedRow} onClick={() => openPracticeRecord(entry.key)}>
                         <div>
-                          <div className={styles.suggestionValue}>
-                            {entry.year} {entry.problem}
-                          </div>
-                          <div className={styles.suggestionHint}>
-                            {formatStatus(entry.status)} | difficulty {entry.difficulty.toFixed(1)}
-                          </div>
+                          <div className={styles.suggestionValue}>{entry.year} {entry.problem}</div>
+                          <div className={styles.suggestionHint}>{formatStatus(entry.status)} | difficulty {entry.difficulty.toFixed(1)}</div>
                         </div>
                       </button>
                     ))
                   )}
                 </div>
-              </form>
-            )}
-          </aside>
-        </div>
-      </section>
+              </article>
+            </div>
+          </section>
 
-      <section id="controls" className={styles.section}>
-        <div className={styles.sectionHeader}>
-          <div>
-            <h3 className={styles.sectionTitle}>Training Controls</h3>
-            <p className={styles.sectionCopy}>Adjust the practice pool and the supporting historical views without touching the dataset.</p>
-          </div>
-        </div>
-
-        <div className={clsx(styles.panel, styles.animateIn)}>
-          <div className={styles.controlsGrid}>
-            <div className={styles.controlGroup}>
-              <p className={styles.controlLabel}>Year Window</p>
-              <div className={styles.inlineControls}>
-                <select
-                  className={styles.select}
-                  value={yearStart}
-                  onChange={(event) => {
-                    const next = Number(event.target.value);
-                    setYearStart(next);
-                    if (next > yearEnd) setYearEnd(next);
-                  }}
-                >
-                  {years.map((year) => (
-                    <option key={`start-${year}`} value={year}>
-                      {year}
-                    </option>
-                  ))}
-                </select>
-                <select className={styles.select} value={yearEnd} onChange={(event) => setYearEnd(Number(event.target.value))}>
-                  {years
-                    .filter((year) => year >= yearStart)
-                    .map((year) => (
-                      <option key={`end-${year}`} value={year}>
-                        {year}
-                      </option>
-                    ))}
-                </select>
-              </div>
-            </div>
-
-            <div className={styles.controlGroup}>
-              <p className={styles.controlLabel}>Metric</p>
-              <div className={styles.metricRow}>
-                {METRICS.map((key) => (
-                  <button
-                    key={key}
-                    type="button"
-                    className={clsx(styles.metricButton, metric === key && styles.metricButtonActive)}
-                    onClick={() => setMetric(key)}
-                  >
-                    {METRIC_META[key].short}
-                  </button>
-                ))}
-              </div>
-              <p className={styles.sectionCopy}>{metricMeta.description}</p>
-            </div>
-
-            <div className={styles.controlGroup}>
-              <p className={styles.controlLabel}>Side and Problem Focus</p>
-              <div className={styles.sideRow}>
-                {(["all", "A", "B"] as const).map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    className={clsx(styles.sideButton, side === value && styles.sideButtonActive)}
-                    onClick={() => setSide(value)}
-                  >
-                    {value === "all" ? "Whole Exam" : `${value}-side`}
-                  </button>
-                ))}
-              </div>
-              <div className={styles.problemGrid}>
-                {visibleProblems.map((problem) => (
-                  <button
-                    key={problem}
-                    type="button"
-                    className={clsx(styles.problemButton, activeProblems.includes(problem) && styles.problemButtonActive)}
-                    onClick={() => toggleProblem(problem)}
-                  >
-                    {problem}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-      <section id="rankings" className={styles.section}>
-        <article className={styles.panel}>
-          <div className={styles.sectionHeader}>
-            <div>
-              <h3 className={styles.sectionTitle}>Historical Rankings</h3>
-              <p className={styles.sectionCopy}>Use the archive as context for where each slot tends to sit over the selected window.</p>
-            </div>
-          </div>
-
-          <div className={styles.summaryStrip}>
-            <div className={styles.summaryInlineCard}>
-              <p className={styles.summaryLabel}>Active Years</p>
-              <p className={styles.summaryInlineValue}>{summary.years}</p>
-            </div>
-            <div className={styles.summaryInlineCard}>
-              <p className={styles.summaryLabel}>Mean Top N</p>
-              <p className={styles.summaryInlineValue}>{summary.meanPopulation.toFixed(0)}</p>
-            </div>
-            <div className={styles.summaryInlineCard}>
-              <p className={styles.summaryLabel}>Strongest Slot</p>
-              <p className={styles.summaryInlineValue}>{summary.easiest.problem}</p>
-            </div>
-            <div className={styles.summaryInlineCard}>
-              <p className={styles.summaryLabel}>Most Skipped</p>
-              <p className={styles.summaryInlineValue}>{summary.mostSkipped.problem}</p>
-            </div>
-          </div>
-
-          <div className={styles.rankingList}>
-            {rankingData.map((entry, index) => (
-              <div key={entry.problem} className={styles.rankingRow}>
-                <span className={styles.rankIndex}>{String(index + 1).padStart(2, "0")}</span>
-                <span className={styles.rankProblem}>{entry.problem}</span>
-                <div className={styles.rankBar}>
-                  <div className={styles.rankBarFill} style={{ width: `${(entry.value / metricMeta.domainMax) * 100}%` }} />
-                </div>
-                <span className={styles.rankValue}>{metricMeta.format(entry.value)}</span>
-              </div>
-            ))}
-          </div>
-        </article>
-      </section>
-
-      <section className={styles.section}>
-        <article className={styles.panel}>
-          <div className={styles.sectionHeader}>
-            <div>
-              <h3 className={styles.sectionTitle}>Attempt vs Skip</h3>
-              <p className={styles.sectionCopy}>A quick scan of which slots the Top N tended to seriously engage with.</p>
-            </div>
-          </div>
-
-          <div className={styles.compactChartWrap}>
-            {isHydrated ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={rankingData} layout="vertical" margin={{ left: 8, right: 16, top: 10, bottom: 8 }}>
-                  <CartesianGrid stroke="rgba(151,177,201,0.12)" horizontal={false} />
-                  <XAxis type="number" domain={[0, 1]} tickFormatter={(value) => `${Math.round(value * 100)}%`} tick={{ fill: "#9fb5cb", fontSize: 12 }} axisLine={false} tickLine={false} />
-                  <YAxis type="category" dataKey="problem" tick={{ fill: "#c8d8e8", fontSize: 12 }} axisLine={false} tickLine={false} width={36} />
-                  <Tooltip content={<TooltipBody metric="attempted_rate" />} />
-                  <Bar dataKey="attempt" name="Attempt Rate" radius={[0, 6, 6, 0]}>
-                    {rankingData.map((entry) => (
-                      <Cell key={`attempt-${entry.problem}`} fill={PROBLEM_COLORS[entry.problem]} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            ) : null}
-          </div>
-        </article>
-      </section>
-      <section id="overview" className={styles.section}>
-        <article className={styles.panel}>
-          <div className={styles.sectionHeader}>
-            <div>
-              <h3 className={styles.sectionTitle}>Dense Archive Overview</h3>
-              <p className={styles.sectionCopy}>The training system is primary, but the archive remains available as a dense reference map.</p>
-            </div>
-          </div>
-
-          <div className={styles.heatmap}>
-            <div className={styles.heatmapTable} style={{ minWidth: `${58 + activeProblems.length * 48}px` }}>
-              <div className={styles.heatmapHeader} style={{ gridTemplateColumns: `58px repeat(${activeProblems.length}, minmax(42px, 1fr))` }}>
-                <div className={styles.heatmapYear}>Year</div>
-                {activeProblems.map((problem) => (
-                  <div key={`header-${problem}`} className={styles.heatmapProblem}>
-                    {problem}
+          <section className={styles.section}>
+            <article className={styles.panel}>
+                <div className={styles.sectionHeader}>
+                  <div>
+                    <h3 className={styles.sectionTitle}>Training Queue</h3>
+                    <p className={styles.sectionCopy}>Recommended next problems grouped by distance from the current training level.</p>
                   </div>
-                ))}
-              </div>
-              {heatmapYears.map((year) => (
-                <div key={`heat-${year}`} className={styles.heatmapRow} style={{ gridTemplateColumns: `58px repeat(${activeProblems.length}, minmax(42px, 1fr))` }}>
-                  <div className={styles.heatmapYear}>{year}</div>
-                  {activeProblems.map((problem) => {
-                    const row = dataset.rows.find((candidate) => candidate.year === year && candidate.problem === problem);
-                    const value = row ? metricValue(row, metric) : 0;
-                    const ratio = heatmapValues.max === heatmapValues.min ? 0.5 : (value - heatmapValues.min) / (heatmapValues.max - heatmapValues.min);
-                    const tint = problem.startsWith("A") ? "127, 230, 255" : "255, 191, 97";
+                </div>
 
+              {error ? <div className={styles.suggestionEmpty}>{error}</div> : null}
+
+              {!isLoaded ? (
+                <div className={styles.suggestionEmpty}>Loading practice state...</div>
+              ) : (
+                <div className={styles.queueGrid}>
+                  {([
+                    ["confidence", "Confidence Wins", "Lower-friction reps below the current level estimate."],
+                    ["on_level", "On-Level Problems", "The main working band for the current level estimate."],
+                    ["stretch", "Stretch Problems", "Harder problems that pressure-test upward movement."],
+                  ] as const).map(([bucketKey, title, copy]) => {
+                    const entries = recommendationGroups[bucketKey];
                     return (
-                      <div
-                        key={`heat-${year}-${problem}`}
-                        className={styles.heatmapCell}
-                        title={`${year} ${problem}: ${metricMeta.format(value)}`}
-                        style={{
-                          background: `rgba(${tint}, ${0.18 + ratio * 0.82})`,
-                          boxShadow: ratio > 0.85 ? `0 0 20px rgba(${tint}, 0.18)` : "none",
-                        }}
-                      >
-                        {metricMeta.format(value)}
+                      <div key={bucketKey} className={styles.trainingBucket}>
+                        <div className={styles.bucketHeader}>
+                          <h4 className={styles.sectionTitle}>{title}</h4>
+                          <p className={styles.sectionCopy}>{copy}</p>
+                        </div>
+                        {entries.length === 0 ? (
+                          <div className={styles.suggestionEmpty}>No matching problems in the current filter slice.</div>
+                        ) : (
+                          <div className={styles.bucketList}>
+                            {entries.map((row) => (
+                              <div key={row.key} className={clsx(styles.queueCard, selectedPracticeEntry?.key === row.key && styles.suggestionRowActive)}>
+                                <div className={styles.queueCardTop}>
+                                  <div className={styles.suggestionMeta}>
+                                    <span className={styles.suggestionYear}>{row.year}</span>
+                                    <span className={styles.suggestionProblem}>{row.problem}</span>
+                                  </div>
+                                  <div className={styles.queueTags}>
+                                    <span className={styles.suggestionTag}>Difficulty {row.difficulty.toFixed(1)}</span>
+                                    <span className={styles.suggestionTag}>{formatStatus(row.status)}</span>
+                                  </div>
+                                </div>
+
+                                <div className={styles.queueCardStats}>
+                                  <div className={styles.queueStat}>
+                                    <span className={styles.queueStatLabel}>Perfect</span>
+                                    <span className={styles.queueStatValue}>{METRIC_META.perfect_solve_rate.format(row.perfect_solve_rate)}</span>
+                                  </div>
+                                  <div className={styles.queueStat}>
+                                    <span className={styles.queueStatLabel}>Attempt</span>
+                                    <span className={styles.queueStatValue}>{METRIC_META.attempted_rate.format(row.attempted_rate)}</span>
+                                  </div>
+                                  <div className={styles.queueStat}>
+                                    <span className={styles.queueStatLabel}>Average</span>
+                                    <span className={styles.queueStatValue}>{row.average_score.toFixed(2)}</span>
+                                  </div>
+                                </div>
+
+                                {row.metadata?.primary_topic ? <p className={styles.queueTopic}>Topic: {row.metadata.primary_topic}</p> : null}
+
+                                <div className={styles.queueCardActions}>
+                                  <button className={styles.completeButton} type="button" onClick={() => openPracticeRecord(row.key)}>Train</button>
+                                  <div className={styles.queueLinkRow}>
+                                    <a className={styles.ghostButton} href={problemSetUrl(row.year)} target="_blank" rel="noreferrer">Problem</a>
+                                    <a className={styles.ghostButton} href={solutionUrl(row.year)} target="_blank" rel="noreferrer">Solution</a>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
                 </div>
-              ))}
+              )}
+            </article>
+          </section>
+        </>
+      ) : (
+        <>
+          <section id="controls" className={styles.section}>
+            <div className={styles.historyGrid}>
+              <article className={styles.panel}>
+                <div className={styles.sectionHeader}>
+                  <div>
+                    <h3 className={styles.sectionTitle}>Historical Controls</h3>
+                    <p className={styles.sectionCopy}>Explore the archive with the same filters and metric definitions used by the trainer.</p>
+                  </div>
+                </div>
+                <div className={styles.controlStack}>
+                  <div className={styles.controlGroup}>
+                    <p className={styles.controlLabel}>Year Window</p>
+                    <div className={styles.inlineControls}>
+                      <select className={styles.select} value={yearStart} onChange={(event) => { const next = Number(event.target.value); setYearStart(next); if (next > yearEnd) setYearEnd(next); }}>
+                        {years.map((year) => <option key={`start-${year}`} value={year}>{year}</option>)}
+                      </select>
+                      <select className={styles.select} value={yearEnd} onChange={(event) => setYearEnd(Number(event.target.value))}>
+                        {years.filter((year) => year >= yearStart).map((year) => <option key={`end-${year}`} value={year}>{year}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className={styles.controlGroup}>
+                    <p className={styles.controlLabel}>Metric</p>
+                    <div className={styles.metricRow}>
+                      {METRICS.map((key) => (
+                        <button key={key} type="button" className={clsx(styles.metricButton, metric === key && styles.metricButtonActive)} onClick={() => setMetric(key)}>{METRIC_META[key].short}</button>
+                      ))}
+                    </div>
+                    <p className={styles.sectionCopy}>{metricMeta.description}</p>
+                  </div>
+
+                  <div className={styles.controlGroup}>
+                    <p className={styles.controlLabel}>Side and Problem Focus</p>
+                    <div className={styles.sideRow}>
+                      {(["all", "A", "B"] as const).map((value) => (
+                        <button key={value} type="button" className={clsx(styles.sideButton, side === value && styles.sideButtonActive)} onClick={() => setSide(value)}>
+                          {value === "all" ? "Whole Exam" : `${value}-side`}
+                        </button>
+                      ))}
+                    </div>
+                    <div className={styles.problemGrid}>
+                      {visibleProblems.map((problem) => (
+                        <button key={problem} type="button" className={clsx(styles.problemButton, activeProblems.includes(problem) && styles.problemButtonActive)} onClick={() => toggleProblem(problem)}>{problem}</button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </article>
+
+              <article className={styles.panel}>
+                <div className={styles.sectionHeader}>
+                  <div>
+                    <h3 className={styles.sectionTitle}>Archive Context</h3>
+                    <p className={styles.sectionCopy}>Snapshot of the current slice before you dive into the rankings and heatmap.</p>
+                  </div>
+                </div>
+                <div className={styles.summaryStrip}>
+                  <div className={styles.summaryInlineCard}><p className={styles.summaryLabel}>Active Years</p><p className={styles.summaryInlineValue}>{summary.years}</p></div>
+                  <div className={styles.summaryInlineCard}><p className={styles.summaryLabel}>Mean Top N</p><p className={styles.summaryInlineValue}>{summary.meanPopulation.toFixed(0)}</p></div>
+                  <div className={styles.summaryInlineCard}><p className={styles.summaryLabel}>Strongest Slot</p><p className={styles.summaryInlineValue}>{summary.easiest?.problem ?? "--"}</p></div>
+                  <div className={styles.summaryInlineCard}><p className={styles.summaryLabel}>Most Skipped</p><p className={styles.summaryInlineValue}>{summary.mostSkipped?.problem ?? "--"}</p></div>
+                </div>
+              </article>
             </div>
-          </div>
-        </article>
-      </section>
+          </section>
 
-      <Footer />
+          <section id="rankings" className={styles.section}>
+            <article className={styles.panel}>
+              <div className={styles.sectionHeader}>
+                <div>
+                  <h3 className={styles.sectionTitle}>Historical Rankings</h3>
+                  <p className={styles.sectionCopy}>Use the archive as context for where each slot tends to sit over the selected window.</p>
+                </div>
+              </div>
+              <div className={styles.rankingList}>
+                {rankingData.map((entry, index) => (
+                  <div key={entry.problem} className={styles.rankingRow}>
+                    <span className={styles.rankIndex}>{String(index + 1).padStart(2, "0")}</span>
+                    <span className={styles.rankProblem}>{entry.problem}</span>
+                    <div className={styles.rankBar}><div className={styles.rankBarFill} style={{ width: `${(entry.value / metricMeta.domainMax) * 100}%` }} /></div>
+                    <span className={styles.rankValue}>{metricMeta.format(entry.value)}</span>
+                  </div>
+                ))}
+              </div>
+            </article>
+          </section>
+          <section className={styles.section}>
+            <article className={styles.panel}>
+              <div className={styles.sectionHeader}>
+                <div>
+                  <h3 className={styles.sectionTitle}>Attempt vs Skip</h3>
+                  <p className={styles.sectionCopy}>A quick scan of which slots the Top N tended to seriously engage with.</p>
+                </div>
+              </div>
+              <div className={styles.compactChartWrap}>
+                {isHydrated ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={rankingData} layout="vertical" margin={{ left: 8, right: 16, top: 10, bottom: 8 }}>
+                      <CartesianGrid stroke="rgba(151,177,201,0.12)" horizontal={false} />
+                      <XAxis type="number" domain={[0, 1]} tickFormatter={(value) => `${Math.round(value * 100)}%`} tick={{ fill: "#9fb5cb", fontSize: 12 }} axisLine={false} tickLine={false} />
+                      <YAxis type="category" dataKey="problem" tick={{ fill: "#c8d8e8", fontSize: 12 }} axisLine={false} tickLine={false} width={36} />
+                      <Tooltip content={<TooltipBody metric="attempted_rate" />} />
+                      <Bar dataKey="attempt" name="Attempt Rate" radius={[0, 6, 6, 0]}>
+                        {rankingData.map((entry) => (
+                          <Cell key={`attempt-${entry.problem}`} fill={PROBLEM_COLORS[entry.problem]} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : null}
+              </div>
+            </article>
+          </section>
+
+          <section id="overview" className={styles.section}>
+            <article className={styles.panel}>
+              <div className={styles.sectionHeader}>
+                <div>
+                  <h3 className={styles.sectionTitle}>Dense Archive Overview</h3>
+                  <p className={styles.sectionCopy}>The full archive scan for the active metric and filter slice.</p>
+                </div>
+              </div>
+              <div className={styles.heatmap}>
+                <div className={styles.heatmapTable} style={{ minWidth: `${58 + activeProblems.length * 48}px` }}>
+                  <div className={styles.heatmapHeader} style={{ gridTemplateColumns: `58px repeat(${activeProblems.length}, minmax(42px, 1fr))` }}>
+                    <div className={styles.heatmapYear}>Year</div>
+                    {activeProblems.map((problem) => <div key={`header-${problem}`} className={styles.heatmapProblem}>{problem}</div>)}
+                  </div>
+                  {heatmapYears.map((year) => (
+                    <div key={`heat-${year}`} className={styles.heatmapRow} style={{ gridTemplateColumns: `58px repeat(${activeProblems.length}, minmax(42px, 1fr))` }}>
+                      <div className={styles.heatmapYear}>{year}</div>
+                      {activeProblems.map((problem) => {
+                        const row = dataset.rows.find((candidate) => candidate.year === year && candidate.problem === problem);
+                        const value = row ? metricValue(row, metric) : 0;
+                        const ratio = heatmapValues.max === heatmapValues.min ? 0.5 : (value - heatmapValues.min) / (heatmapValues.max - heatmapValues.min);
+                        const tint = problem.startsWith("A") ? "127, 230, 255" : "255, 191, 97";
+                        return (
+                          <div
+                            key={`heat-${year}-${problem}`}
+                            className={styles.heatmapCell}
+                            title={`${year} ${problem}: ${metricMeta.format(value)}`}
+                            style={{ background: `rgba(${tint}, ${0.18 + ratio * 0.82})`, boxShadow: ratio > 0.85 ? `0 0 20px rgba(${tint}, 0.18)` : "none" }}
+                          >
+                            {metricMeta.format(value)}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </article>
+          </section>
+        </>
+      )}
+
+      <SiteFooter />
     </main>
-  );
-}
-
-function Footer() {
-  return (
-    <footer className={styles.footer}>
-      <a className={styles.footerLink} href="https://arjun.systems" target="_blank" rel="noreferrer">
-        <Image className={`${styles.footerIcon} ${styles.footerIconLarge}`} src="/systems%20site%20icon.png" alt="Arjun Systems" width={26} height={26} />
-        <span className={styles.footerLinkText}>arjun.systems</span>
-      </a>
-      <span className={styles.footerDivider}>{"//"}</span>
-      <a className={styles.footerLink} href="https://arjuniyer.dev" target="_blank" rel="noreferrer">
-        <Image className={styles.footerIcon} src="/personal%20site%20icon.png" alt="Arjun Iyer" width={20} height={20} />
-        <span className={styles.footerLinkText}>arjuniyer.dev</span>
-      </a>
-    </footer>
   );
 }
