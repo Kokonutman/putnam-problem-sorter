@@ -443,12 +443,23 @@ function PutnamDashboardLoaded({ dataset }: { dataset: PutnamDataset }) {
     const attempt_count = Number(formData.get("attempt_count") ?? 0);
     const notes = String(formData.get("notes") ?? "");
     const touchDate = String(formData.get("touch_date") ?? "");
+    const normalizedTouchDate = touchDate.trim();
+    const todayDate = new Date().toISOString().slice(0, 10);
+    const hasMeaningfulDate =
+      normalizedTouchDate.length > 0 &&
+      (normalizedTouchDate !== todayDate || Boolean(selectedPracticeEntry.record?.last_attempted_at));
+    const isEffectivelyEmpty =
+      status === "unattempted" &&
+      total_minutes <= 0 &&
+      attempt_count <= 0 &&
+      notes.trim() === "" &&
+      !hasMeaningfulDate;
 
     setSaving(true);
     setSaveError(null);
 
     try {
-      if (status === "unattempted" && total_minutes <= 0 && attempt_count <= 0 && notes.trim() === "") {
+      if (isEffectivelyEmpty) {
         await remove(selectedPracticeEntry.key);
       } else {
         await save({
@@ -456,7 +467,7 @@ function PutnamDashboardLoaded({ dataset }: { dataset: PutnamDataset }) {
           year: selectedPracticeEntry.year,
           problem: selectedPracticeEntry.problem,
           status,
-          last_attempted_at: touchDate ? new Date(`${touchDate}T12:00:00`).toISOString() : new Date().toISOString(),
+          last_attempted_at: normalizedTouchDate ? new Date(`${normalizedTouchDate}T12:00:00`).toISOString() : new Date().toISOString(),
           total_minutes: Number.isFinite(total_minutes) ? total_minutes : 0,
           attempt_count: Number.isFinite(attempt_count) ? attempt_count : 0,
           notes,
