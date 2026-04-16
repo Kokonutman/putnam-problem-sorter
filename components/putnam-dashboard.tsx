@@ -195,6 +195,10 @@ function problemSetUrl(year: number) {
   return `https://kskedlaya.org/putnam-archive/${year}.pdf`;
 }
 
+function hasSolutionPdf(year: number) {
+  return year >= 1995 && year <= 2025;
+}
+
 function solutionUrl(year: number) {
   return `https://kskedlaya.org/putnam-archive/${year}s.pdf`;
 }
@@ -231,7 +235,7 @@ function TooltipBody({
 }
 
 export function PutnamDashboard({ dataset }: { dataset: PutnamDataset }) {
-  if (dataset.missing || dataset.rows.length === 0) {
+  if (dataset.missing || dataset.archiveRows.length === 0) {
     return <MissingDatasetState />;
   }
 
@@ -262,7 +266,8 @@ function MissingDatasetState() {
   );
 }
 function PutnamDashboardLoaded({ dataset }: { dataset: PutnamDataset }) {
-  const years = useMemo(() => [...new Set(dataset.rows.map((row) => row.year))].sort((a, b) => a - b), [dataset.rows]);
+  const years = useMemo(() => [...new Set(dataset.archiveRows.map((row) => row.year))].sort((a, b) => a - b), [dataset.archiveRows]);
+  const statYears = useMemo(() => [...new Set(dataset.rows.map((row) => row.year))].sort((a, b) => a - b), [dataset.rows]);
   const [yearStart, setYearStart] = useState(years[0]);
   const [yearEnd, setYearEnd] = useState(years[years.length - 1]);
   const [metric, setMetric] = useState<MetricKey>("average_score");
@@ -303,7 +308,7 @@ function PutnamDashboardLoaded({ dataset }: { dataset: PutnamDataset }) {
 
   const allTrainingRows = useMemo<TrainingEntry[]>(
     () =>
-      dataset.rows.map((row) => {
+      dataset.archiveRows.map((row) => {
         const key = problemKey(row.year, row.problem);
         const record = recordsByKey.get(key) ?? null;
         return {
@@ -315,7 +320,7 @@ function PutnamDashboardLoaded({ dataset }: { dataset: PutnamDataset }) {
           metadata: dataset.metadataByKey[key] ?? null,
         };
       }),
-    [dataset.metadataByKey, dataset.rows, recordsByKey]
+    [dataset.archiveRows, dataset.metadataByKey, recordsByKey]
   );
 
   const trainingRows = useMemo<TrainingEntry[]>(
@@ -325,7 +330,7 @@ function PutnamDashboardLoaded({ dataset }: { dataset: PutnamDataset }) {
   );
 
   const metricMeta = METRIC_META[metric];
-  const currentLevel = useMemo(() => estimateCurrentLevel(dataset.rows, records), [dataset.rows, records]);
+  const currentLevel = useMemo(() => estimateCurrentLevel(dataset.archiveRows, records), [dataset.archiveRows, records]);
   const solvedCount = useMemo(() => records.filter((record) => isSolvedStatus(record.status)).length, [records]);
   const activeCount = useMemo(() => records.filter((record) => isActiveStatus(record.status)).length, [records]);
   const partialCount = useMemo(() => records.filter((record) => record.status === "partially_solved").length, [records]);
@@ -412,7 +417,7 @@ function PutnamDashboardLoaded({ dataset }: { dataset: PutnamDataset }) {
     };
   }, [filteredRows, rankingData]);
 
-  const heatmapYears = useMemo(() => years.filter((year) => year >= yearStart && year <= yearEnd), [yearEnd, yearStart, years]);
+  const heatmapYears = useMemo(() => statYears.filter((year) => year >= yearStart && year <= yearEnd), [statYears, yearEnd, yearStart]);
   const heatmapValues = useMemo(() => {
     const values = activeProblems.flatMap((problem) =>
       heatmapYears.map((year) => {
@@ -619,7 +624,12 @@ function PutnamDashboardLoaded({ dataset }: { dataset: PutnamDataset }) {
                     <div className={styles.completedRow}>
                       <div>
                         <div className={styles.suggestionValue}>{selectedPracticeEntry.year} {selectedPracticeEntry.problem}</div>
-                        <div className={styles.suggestionHint}>Difficulty {selectedPracticeEntry.difficulty.toFixed(1)} | {selectedPracticeEntry.metadata?.primary_topic ?? "Topic pending"}</div>
+                        <div className={styles.suggestionHint}>
+                          Difficulty {selectedPracticeEntry.difficulty.toFixed(1)}
+                          {selectedPracticeEntry.stats_source === "estimated" ? " | estimated from nearby archive data" : ""}
+                          {" | "}
+                          {selectedPracticeEntry.metadata?.primary_topic ?? "Topic pending"}
+                        </div>
                         <div className={styles.suggestionHint}>Last touched: {formatAttemptDate(selectedPracticeEntry.record?.last_attempted_at ?? null)}</div>
                       </div>
                       <button className={styles.ghostButton} type="button" onClick={() => void handleReset(selectedPracticeEntry.key)}>Reset</button>
@@ -660,7 +670,11 @@ function PutnamDashboardLoaded({ dataset }: { dataset: PutnamDataset }) {
                     <div className={styles.suggestionActions}>
                       <button className={styles.completeButton} type="submit" disabled={saving}>{saving ? "Saving" : "Save Record"}</button>
                       <a className={styles.ghostButton} href={problemSetUrl(selectedPracticeEntry.year)} target="_blank" rel="noreferrer">Problem</a>
-                      <a className={styles.ghostButton} href={solutionUrl(selectedPracticeEntry.year)} target="_blank" rel="noreferrer">Solution</a>
+                      {hasSolutionPdf(selectedPracticeEntry.year) ? (
+                        <a className={styles.ghostButton} href={solutionUrl(selectedPracticeEntry.year)} target="_blank" rel="noreferrer">Solution</a>
+                      ) : (
+                        <span className={clsx(styles.ghostButton, styles.disabledAction)}>No Solution</span>
+                      )}
                     </div>
 
                     <div className={styles.practiceMetaGrid}>
@@ -670,9 +684,13 @@ function PutnamDashboardLoaded({ dataset }: { dataset: PutnamDataset }) {
                         <p className={styles.calloutHint}>Relative to your current estimated level</p>
                       </div>
                       <div className={styles.callout}>
-                        <p className={styles.calloutTitle}>Archive Average</p>
+                        <p className={styles.calloutTitle}>{selectedPracticeEntry.stats_source === "estimated" ? "Estimated Average" : "Archive Average"}</p>
                         <p className={styles.calloutValue}>{METRIC_META.average_score.format(selectedPracticeEntry.average_score)}</p>
-                        <p className={styles.calloutHint}>Average score for the Top N population</p>
+                        <p className={styles.calloutHint}>
+                          {selectedPracticeEntry.stats_source === "estimated"
+                            ? "Estimated from 1985-1988 and 1995-1999 for the same slot"
+                            : "Average score for the Top N population"}
+                        </p>
                       </div>
                     </div>
                   </form>
@@ -870,7 +888,9 @@ function PutnamDashboardLoaded({ dataset }: { dataset: PutnamDataset }) {
                                     <span className={styles.suggestionProblem}>{row.problem}</span>
                                   </div>
                                   <div className={styles.queueTags}>
-                                    <span className={styles.suggestionTag}>Difficulty {row.difficulty.toFixed(1)}</span>
+                                    <span className={styles.suggestionTag}>
+                                      Difficulty {row.difficulty.toFixed(1)}{row.stats_source === "estimated" ? " est." : ""}
+                                    </span>
                                     <span className={styles.suggestionTag}>{formatStatus(row.status)}</span>
                                   </div>
                                 </div>
@@ -896,7 +916,11 @@ function PutnamDashboardLoaded({ dataset }: { dataset: PutnamDataset }) {
                                   <button className={styles.completeButton} type="button" onClick={() => openPracticeRecord(row.key)}>Train</button>
                                   <div className={styles.queueLinkRow}>
                                     <a className={styles.ghostButton} href={problemSetUrl(row.year)} target="_blank" rel="noreferrer">Problem</a>
-                                    <a className={styles.ghostButton} href={solutionUrl(row.year)} target="_blank" rel="noreferrer">Solution</a>
+                                    {hasSolutionPdf(row.year) ? (
+                                      <a className={styles.ghostButton} href={solutionUrl(row.year)} target="_blank" rel="noreferrer">Solution</a>
+                                    ) : (
+                                      <span className={clsx(styles.ghostButton, styles.disabledAction)}>No Solution</span>
+                                    )}
                                   </div>
                                 </div>
                               </div>

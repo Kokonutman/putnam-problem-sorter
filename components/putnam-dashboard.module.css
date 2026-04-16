@@ -281,6 +281,16 @@
   color: #cfe8fa;
 }
 
+.disabledAction {
+  opacity: 0.5;
+  cursor: not-allowed;
+  color: var(--muted);
+  border-style: dashed;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+}
+
 .authMessage {
   border-radius: 12px;
   border: 1px solid rgba(255, 159, 159, 0.24);
@@ -696,7 +706,7 @@
 
 .queueLinkRow {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
   gap: 8px;
 }
 

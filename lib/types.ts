@@ -32,6 +32,7 @@ export type PutnamStatRow = {
   attempted_rate: number;
   average_score: number;
   average_score_among_attempts: number;
+  stats_source?: "actual" | "estimated";
 };
 
 export type ProblemMetadata = {
@@ -55,6 +56,7 @@ export type PracticeRecord = {
 
 export type PutnamDataset = {
   rows: PutnamStatRow[];
+  archiveRows: PutnamStatRow[];
   metadataByKey: Record<string, ProblemMetadata>;
   sourcePath: string;
   missing: boolean;

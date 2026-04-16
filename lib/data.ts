@@ -5,6 +5,9 @@ import { PROBLEMS, type ProblemId, type ProblemMetadata, type PutnamDataset, typ
 
 const DATASET_FILENAME = "putnam_problem_stats_all_years.csv";
 const METADATA_FILENAME = "putnam_problem_metadata.json";
+const ARCHIVE_START_YEAR = 1985;
+const ARCHIVE_END_YEAR = 2025;
+const ESTIMATE_SOURCE_YEARS = new Set([1985, 1986, 1987, 1988, 1995, 1996, 1997, 1998, 1999]);
 
 type RawRow = Record<string, string | number>;
 
@@ -34,7 +37,66 @@ function normalizeRow(raw: RawRow, rowIndex: number): PutnamStatRow {
     attempted_rate: parseNumber(raw.attempted_rate, "attempted_rate", rowIndex),
     average_score: parseNumber(raw.average_score, "average_score", rowIndex),
     average_score_among_attempts: parseNumber(raw.average_score_among_attempts, "average_score_among_attempts", rowIndex),
+    stats_source: "actual",
   };
+}
+
+function average(values: number[]) {
+  if (values.length === 0) return 0;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function buildArchiveRows(rows: PutnamStatRow[]) {
+  const existing = new Map(rows.map((row) => [`${row.year}-${row.problem}`, row]));
+  const estimateRows = rows.filter((row) => ESTIMATE_SOURCE_YEARS.has(row.year));
+
+  const estimateByProblem = new Map(
+    PROBLEMS.map((problem) => {
+      const problemRows = estimateRows.filter((row) => row.problem === problem);
+      const population = Math.max(1, Math.round(average(problemRows.map((row) => row.population_top_n))));
+      const perfectSolveRate = average(problemRows.map((row) => row.perfect_solve_rate));
+      const nonzeroScoreRate = average(problemRows.map((row) => row.nonzero_score_rate));
+      const attemptedRate = average(problemRows.map((row) => row.attempted_rate));
+      const averageScore = average(problemRows.map((row) => row.average_score));
+      return [
+        problem,
+        {
+          population_top_n: population,
+          perfect_solve_count: Math.round(perfectSolveRate * population),
+          perfect_solve_rate: perfectSolveRate,
+          nonzero_score_count: Math.round(nonzeroScoreRate * population),
+          nonzero_score_rate: nonzeroScoreRate,
+          attempted_count: Math.round(attemptedRate * population),
+          attempted_rate: attemptedRate,
+          average_score: averageScore,
+          average_score_among_attempts: average(problemRows.map((row) => row.average_score_among_attempts)),
+        },
+      ] as const;
+    })
+  );
+
+  const archiveRows: PutnamStatRow[] = [];
+  for (let year = ARCHIVE_START_YEAR; year <= ARCHIVE_END_YEAR; year += 1) {
+    for (const problem of PROBLEMS) {
+      const key = `${year}-${problem}`;
+      const actual = existing.get(key);
+      if (actual) {
+        archiveRows.push(actual);
+        continue;
+      }
+
+      const estimate = estimateByProblem.get(problem);
+      if (!estimate) continue;
+      archiveRows.push({
+        year,
+        problem,
+        ...estimate,
+        stats_source: "estimated",
+      });
+    }
+  }
+
+  return archiveRows;
 }
 
 export async function loadPutnamDataset(): Promise<PutnamDataset> {
@@ -72,10 +134,10 @@ export async function loadPutnamDataset(): Promise<PutnamDataset> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
 
-    return { rows, metadataByKey, sourcePath, missing: false };
+    return { rows, archiveRows: buildArchiveRows(rows), metadataByKey, sourcePath, missing: false };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return { rows: [], metadataByKey: {}, sourcePath, missing: true };
+      return { rows: [], archiveRows: [], metadataByKey: {}, sourcePath, missing: true };
     }
     throw error;
   }
